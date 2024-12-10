@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Loader from "../Components/Common/Loader.jsx";
 
 const CartPage = () => {
   const [cartItems, setCartItems] = useState([]);
   const [total, setTotal] = useState({ subtotal: 0, tax: 0, grandTotal: 0 });
+  const [promoCode, setPromoCode] = useState("");
+  const [availablePromoCodes, setAvailablePromoCodes] = useState([]);
+  const [discount, setDiscount] = useState(0);
+  const [appliedPromo, setAppliedPromo] = useState(null);
   const navigate = useNavigate();
 
   // Fetch Cart Items
@@ -27,9 +32,7 @@ const CartPage = () => {
           }
         );
         const data = await response.json();
-        console.log(data);
 
-        // Extract order items and pricing details
         const order = data.data[0];
         const items = data.included.filter(
           (item) => item.type === "commerce_order_item--default"
@@ -60,21 +63,59 @@ const CartPage = () => {
     fetchCartItems();
   }, []);
 
-  // Recalculate Totals
-  const recalculateTotals = (updatedCartItems) => {
-    const newSubtotal = updatedCartItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0
-    );
-    const taxRate = 0.12; // Assuming 12% tax rate
-    const newTax = newSubtotal * taxRate;
-    const newGrandTotal = newSubtotal + newTax;
+  // Fetch Available Promo Codes
+  useEffect(() => {
+    const fetchAvailablePromoCodes = async () => {
+      const myHeaders = new Headers();
+      myHeaders.append("Accept", "application/vnd.api+json");
+      myHeaders.append("Content-Type", "application/vnd.api+json");
+      myHeaders.append("Authorization", "Basic dGVzdDp0ZXN0");
 
-    setTotal({
-      subtotal: newSubtotal,
-      tax: newTax,
-      grandTotal: newGrandTotal,
-    });
+      try {
+        const response = await fetch(
+          "https://main-bvxea6i-dzghxlrwlqmsu.us-2.platformsh.site/jsonapi/commerce_promotion_coupon/commerce_promotion_coupon",
+          {
+            method: "GET",
+            headers: myHeaders,
+          }
+        );
+        const data = await response.json();
+
+        const promoCodes = data.data.map((promo) => ({
+          id: promo.id,
+          code: promo.attributes.code,
+          status: promo.attributes.status,
+          startDate: promo.attributes.start_date,
+          endDate: promo.attributes.end_date || "No Expiration",
+        }));
+
+        setAvailablePromoCodes(promoCodes);
+      } catch (error) {
+        console.error("Error fetching promo codes:", error);
+      }
+    };
+
+    fetchAvailablePromoCodes();
+  }, []);
+
+  // Apply Promo Code
+  const applyPromoCode = () => {
+    const selectedPromo = availablePromoCodes.find(
+      (promo) => promo.code === promoCode
+    );
+
+    if (selectedPromo) {
+      const discountAmount = total.subtotal * 0.1; // Assuming a 10% discount
+      setDiscount(discountAmount);
+      setAppliedPromo(selectedPromo.code);
+      setTotal((prevTotal) => ({
+        ...prevTotal,
+        grandTotal: prevTotal.grandTotal - discountAmount,
+      }));
+      alert(`Promo code "${promoCode}" applied successfully!`);
+    } else {
+      alert("Invalid promo code. Please try again.");
+    }
   };
 
   // Adjust Quantity Handler
@@ -101,6 +142,23 @@ const CartPage = () => {
     });
   };
 
+  // Recalculate Totals
+  const recalculateTotals = (updatedCartItems) => {
+    const newSubtotal = updatedCartItems.reduce(
+      (sum, item) => sum + item.unitPrice * item.quantity,
+      0
+    );
+    const taxRate = 0.12; // Assuming 12% tax rate
+    const newTax = newSubtotal * taxRate;
+    const newGrandTotal = newSubtotal + newTax - discount;
+
+    setTotal({
+      subtotal: newSubtotal,
+      tax: newTax,
+      grandTotal: newGrandTotal,
+    });
+  };
+
   // Remove Item Handler
   const removeItem = (id) => {
     setCartItems((prevItems) => {
@@ -112,13 +170,17 @@ const CartPage = () => {
 
   // Checkout Handler
   const handleCheckout = () => {
-    navigate("/checkout");
+    const token = localStorage.getItem("csrf_token");
+    if (!token) {
+      alert("Please login to checkout your products");
+      navigate("/login");
+    } else {
+      navigate("/checkout");
+    }
   };
 
   if (!cartItems.length) {
-    return (
-      <p className="text-center mt-10 text-gray-700">Your cart is empty!</p>
-    );
+    return <Loader />;
   }
 
   return (
@@ -136,6 +198,9 @@ const CartPage = () => {
               >
                 <div>
                   <h3 className="text-lg font-semibold">{item.title}</h3>
+                  <p className="text-sm text-gray-500">
+                    Quantity: {item.quantity}
+                  </p>
                 </div>
                 <div className="flex items-center gap-4">
                   <button
@@ -174,12 +239,72 @@ const CartPage = () => {
               <p>Tax</p>
               <p>${total.tax.toFixed(2)}</p>
             </div>
+            <div className="flex justify-between mb-2">
+              <p>Discount</p>
+              <p>-${discount.toFixed(2)}</p>
+            </div>
             <div className="flex justify-between text-lg font-bold">
               <p>Total</p>
               <p>${total.grandTotal.toFixed(2)}</p>
             </div>
+
+            {/* Promo Code Section */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold mb-4">Apply Promo Code</h3>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="border border-gray-300 rounded-md px-4 py-2 w-full"
+                  placeholder="Enter promo code"
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value)}
+                />
+                <button
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  onClick={applyPromoCode}
+                >
+                  Apply
+                </button>
+              </div>
+              {appliedPromo && (
+                <p className="mt-2 text-green-600">
+                  Promo code <strong>{appliedPromo}</strong> applied!
+                </p>
+              )}
+            </div>
+
+            {/* Available Promo Codes */}
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4">Available Promo Codes</h3>
+              {availablePromoCodes.length > 0 ? (
+                <ul className="space-y-2">
+                  {availablePromoCodes.map((promo) => (
+                    <li
+                      key={promo.id}
+                      className="flex justify-between items-center border p-2 rounded-md bg-gray-100"
+                    >
+                      <div>
+                        <p className="font-medium">{promo.code}</p>
+                        <p className="text-sm text-gray-600">
+                          Shop Swift coupon
+                        </p>
+                      </div>
+                      <button
+                        className="text-blue-500 hover:underline"
+                        onClick={() => setPromoCode(promo.code)}
+                      >
+                        Use
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-gray-600">No promo codes available at the moment.</p>
+              )}
+            </div>
+
             <button
-              className="mt-6 w-full py-3 bg-gradient-to-r from-blue-500 to-blue-700 text-white rounded-md text-lg font-medium hover:scale-105 transform transition"
+              className="mt-6 w-full py-3 bg-gradient-to-r from-pink-500 to-pink-700 text-white rounded-md text-lg font-medium hover:scale-105 transform transition"
               onClick={handleCheckout}
             >
               Proceed to Checkout
